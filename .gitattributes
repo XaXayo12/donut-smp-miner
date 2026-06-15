@@ -1,0 +1,6 @@
+# Normalise les fins de ligne : LF partout, sauf les .bat Windows en CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.zip binary

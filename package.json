@@ -1,0 +1,27 @@
+{
+  "name": "donut-smp-miner",
+  "version": "1.0.0",
+  "description": "Multi-account dirt mining bot for DonutSMP. Token login, auto token-refresh, proxies, encrypted vault, and a friendly console.",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "import": "node src/index.js --import",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@inquirer/prompts": "^7.2.1",
+    "adm-zip": "^0.5.16",
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.5",
+    "mineflayer": "github:GenerelSchwerz/mineflayer#master",
+    "mineflayer-pathfinder": "^2.4.5",
+    "prismarine-auth": "^2.7.0",
+    "socks": "^2.8.3",
+    "undici": "^6.21.0"
+  }
+}
