@@ -7,6 +7,7 @@
 //    socket déjà branché. (Comportement vérifié dans le code de la lib.)
 
 import net from 'node:net'
+import dns from 'node:dns'
 import { SocksClient } from 'socks'
 
 /**
@@ -89,32 +90,50 @@ function httpConnect (proxy, host, port) {
   })
 }
 
+// Résout l'adresse réelle: beaucoup de serveurs MC (dont DonutSMP) utilisent
+// un enregistrement DNS "SRV". On le cherche, comme le fait minecraft-protocol.
+function resolveTarget (host, port) {
+  return new Promise((resolve) => {
+    // On ne tente le SRV que si le port est par défaut et l'hôte est un nom.
+    if (port !== 25565 || net.isIP(host) !== 0 || host === 'localhost') {
+      return resolve({ host, port })
+    }
+    dns.resolveSrv('_minecraft._tcp.' + host, (err, addrs) => {
+      if (!err && addrs && addrs.length > 0) resolve({ host: addrs[0].name, port: addrs[0].port })
+      else resolve({ host, port }) // pas de SRV -> connexion directe
+    })
+  })
+}
+
 /**
  * Fabrique la fonction "connect" attendue par minecraft-protocol.
+ * Gère le SRV (résolution d'adresse) ET le proxy (SOCKS5/HTTP).
  * @param {object} opts { host, port, proxy }  proxy = objet parseProxy() ou null
  * @returns {function} (client) => void
  */
 export function makeConnect ({ host, port, proxy }) {
   return function connect (client) {
-    // Pas de proxy: connexion directe normale.
-    if (!proxy) {
-      client.setSocket(net.connect(port, host))
-      return // le socket émettra 'connect' tout seul
-    }
+    resolveTarget(host, port).then(({ host: rHost, port: rPort }) => {
+      // Pas de proxy: connexion directe (le socket émettra 'connect' tout seul).
+      if (!proxy) {
+        client.setSocket(net.connect(rPort, rHost))
+        return
+      }
 
-    const open = proxy.type === 'http'
-      ? httpConnect(proxy, host, port)
-      : socks5Connect(proxy, host, port)
+      const open = proxy.type === 'http'
+        ? httpConnect(proxy, rHost, rPort)
+        : socks5Connect(proxy, rHost, rPort)
 
-    open
-      .then((socket) => {
-        client.setSocket(socket)
-        // Le socket est DÉJÀ branché -> on prévient le client nous-mêmes.
-        client.emit('connect')
-      })
-      .catch((err) => {
-        client.emit('error', new Error('Échec du proxy: ' + err.message))
-      })
+      open
+        .then((socket) => {
+          client.setSocket(socket)
+          // Le socket est DÉJÀ branché -> on prévient le client nous-mêmes.
+          client.emit('connect')
+        })
+        .catch((err) => {
+          client.emit('error', new Error('Échec du proxy: ' + err.message))
+        })
+    })
   }
 }
 
