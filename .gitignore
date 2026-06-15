@@ -1,0 +1,36 @@
+# ---- Dependances ----
+node_modules/
+
+# ---- SECRETS : ne JAMAIS pousser sur GitHub ----
+# Le coffre chiffre + les caches de jetons en clair pendant l'execution.
+data/*
+# ...mais on garde le dossier (vide) dans le depot.
+!data/.gitkeep
+
+# Ta config perso (peut contenir des proxys).
+config/config.json
+
+# Variables d'environnement.
+.env
+
+# Fichiers d'export de comptes (jetons / cookies en clair).
+*.zip
+**/accounts.txt
+**/cookies/
+
+# Dossier d'exemples (peut contenir des comptes rafraichis).
+samples/*
+!samples/.gitkeep
+!samples/README.md
+
+# Dossier d'inspection temporaire.
+_inspect/
+
+# ---- Reglages locaux de l'outil ----
+.claude/settings.local.json
+
+# ---- Divers ----
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

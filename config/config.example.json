@@ -1,0 +1,31 @@
+{
+  "server": {
+    "host": "donutsmp.net",
+    "port": 25565,
+    "version": false
+  },
+  "mining": {
+    "targetBlocks": ["dirt", "grass_block", "coarse_dirt", "rooted_dirt", "dirt_path", "podzol", "mud"],
+    "horizontalRadius": 16,
+    "maxFallDistance": 3,
+    "digTimeoutMs": 10000,
+    "reachOnly": true,
+    "pauseBetweenBlocksMs": 150
+  },
+  "behavior": {
+    "reconnectDelayMs": 8000,
+    "maxReconnects": 0,
+    "refreshMarginSeconds": 600,
+    "antiAfk": true,
+    "antiAfkIntervalMs": 45000,
+    "startStaggerMs": 4000
+  },
+  "proxy": {
+    "enabled": false,
+    "mode": "per-account",
+    "list": []
+  },
+  "console": {
+    "refreshMs": 1000
+  }
+}
