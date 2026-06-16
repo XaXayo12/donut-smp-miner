@@ -1,19 +1,18 @@
-// 📦 Ce fichier = "le chef d'orchestre".
-//    Il lance PLUSIEURS comptes en même temps, leur donne un proxy si besoin,
-//    sauvegarde les nouveaux jetons dans le coffre, et garde la liste de tous
-//    les bots pour le tableau de bord.
-//
-//    (English: orchestrates many ManagedBots: proxy assignment, staggered
-//     start, and saving rotated tokens back into the encrypted vault.)
+// 📦 botManager.js — the conductor.
+//    Runs MANY accounts at once, each isolated, hands each one its proxy,
+//    saves refreshed tokens back into the vault, records "done" reports,
+//    and keeps the list of bots for the live dashboard.
 
 import { EventEmitter } from 'node:events'
+import fs from 'node:fs'
+import path from 'node:path'
 import { ManagedBot } from '../bot/createBot.js'
 
 export class BotManager extends EventEmitter {
   /**
-   * @param {object} vault - le coffre déjà ouvert
-   * @param {object} config - la config globale
-   * @param {object} paths - chemins (paths.tokenCache)
+   * @param {object} vault - the already-opened vault
+   * @param {object} config - global config
+   * @param {object} paths - paths (paths.data, paths.tokenCache)
    */
   constructor (vault, config, paths) {
     super()
@@ -24,19 +23,18 @@ export class BotManager extends EventEmitter {
     this._saving = Promise.resolve()
   }
 
-  // Décide quel proxy donne-t-on à un compte.
+  // Which proxy does this account use?
   _resolveProxy (account) {
     const p = this.config.proxy
     if (!p.enabled) return null
     if (p.mode === 'rotate' && p.list.length) {
-      // On distribue la liste dans l'ordre des comptes.
       const index = [...this.bots.keys()].indexOf(account.id)
       return p.list[(index >= 0 ? index : 0) % p.list.length]
     }
-    return account.proxy || null // mode 'per-account'
+    return account.proxy || null // 'per-account' mode
   }
 
-  // Sauvegarde (en file d'attente) les nouveaux jetons d'un compte dans le coffre.
+  // Queue a vault save of an account's refreshed tokens (so rotations persist).
   _saveCredentials (account, creds) {
     this._saving = this._saving.then(async () => {
       const stored = this.vault.findAccount(account.id)
@@ -44,48 +42,52 @@ export class BotManager extends EventEmitter {
       if (creds.refreshToken) stored.refreshToken = creds.refreshToken
       if (creds.mctoken) {
         stored.mctoken = creds.mctoken
-        // On met à jour les infos lisibles (expiration) de façon cohérente.
         stored.tokenInfo = stored.tokenInfo || {}
         if (creds.obtainedOn) stored.tokenInfo.issuedAt = Math.floor(creds.obtainedOn / 1000)
         if (creds.expiresInSeconds) stored.tokenInfo.expiresInSeconds = creds.expiresInSeconds
       }
       stored.lastRefreshedAt = new Date().toISOString()
       await this.vault.save()
-      this.emit('log', `🔄 jetons mis à jour et sauvegardés pour ${account.name}`)
-    }).catch(err => this.emit('log', 'Erreur sauvegarde coffre: ' + err.message))
+      this.emit('log', `🔄 tokens refreshed & saved for ${account.name}`)
+    }).catch(err => this.emit('log', 'vault save error: ' + err.message))
     return this._saving
   }
 
-  // Crée (sans démarrer) un bot géré pour un compte.
+  // Write a "done" line to data/reports.log and announce it loudly.
+  _onDone (account, report) {
+    const line = `[${new Date().toISOString()}] DONE ${account.name}: ${report.dirt} dirt (${report.mined} blocks mined)`
+    try {
+      fs.mkdirSync(this.paths.data, { recursive: true })
+      fs.appendFileSync(path.join(this.paths.data, 'reports.log'), line + '\n')
+    } catch { /* ignore */ }
+    this.emit('log', '✅ ' + line)
+    this.emit('done', { account, report })
+  }
+
   _make (account) {
     const bot = new ManagedBot(account, this.config, {
       tokenCacheDir: this.paths.tokenCache,
       resolveProxy: (a) => this._resolveProxy(a),
       onCredentials: (a, creds) => this._saveCredentials(a, creds)
     })
-    // On relaie les événements vers l'extérieur (préfixés par le compte).
     const relay = (evt) => bot.on(evt, (...args) => this.emit('bot', { id: account.id, name: account.name, event: evt, args, bot }))
-    ;['state', 'mined', 'status', 'log', 'needs-login', 'token-updated', 'warn'].forEach(relay)
+    ;['state', 'mined', 'status', 'log', 'needs-login', 'token-updated', 'warn', 'done'].forEach(relay)
+    bot.on('done', (report) => this._onDone(account, report))
     this.bots.set(account.id, bot)
     return bot
   }
 
-  /**
-   * Démarre tous les comptes activés, avec un petit décalage entre chacun.
-   */
+  /** Start every enabled account, staggered so they don't all connect at once. */
   async startAll () {
     const accounts = this.vault.getAccounts().filter(a => a.enabled !== false)
-    if (!accounts.length) {
-      this.emit('log', 'Aucun compte activé dans le coffre.')
-      return
-    }
+    if (!accounts.length) { this.emit('log', 'No enabled accounts in the vault.'); return }
     let i = 0
     for (const account of accounts) {
       const bot = this.bots.get(account.id) || this._make(account)
       setTimeout(() => bot.start(), i * this.config.behavior.startStaggerMs)
       i++
     }
-    this.emit('log', `Démarrage de ${accounts.length} compte(s)…`)
+    this.emit('log', `Starting ${accounts.length} account(s)…`)
   }
 
   startOne (idOrName) {
@@ -96,11 +98,9 @@ export class BotManager extends EventEmitter {
     return true
   }
 
-  stopAll () {
-    for (const bot of this.bots.values()) bot.stop()
-  }
+  stopAll () { for (const bot of this.bots.values()) bot.stop() }
 
-  /** Liste à plat pour le tableau de bord. */
+  /** Flat list for the dashboard. */
   snapshot () {
     return [...this.bots.values()].map(b => ({
       name: b.account.name,
@@ -112,7 +112,6 @@ export class BotManager extends EventEmitter {
     }))
   }
 
-  // Efface tous les caches de jetons en clair (à la fermeture).
   wipeAll () { for (const bot of this.bots.values()) bot.wipeCache() }
 }
 

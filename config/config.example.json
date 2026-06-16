@@ -8,16 +8,32 @@
     "targetBlocks": ["dirt", "grass_block", "coarse_dirt", "rooted_dirt", "dirt_path", "podzol", "mud"],
     "horizontalRadius": 16,
     "maxFallDistance": 3,
-    "digTimeoutMs": 10000,
+    "digTimeoutMs": 12000,
     "reachOnly": true,
     "pauseBetweenBlocksMs": 150
+  },
+  "work": {
+    "shovelTier": "wooden",
+    "shovelsPerBatch": 6,
+    "logsNeededPerBatch": 4,
+    "woodSearchRadius": 48,
+    "tidyEveryBlocks": 16,
+    "fullWhenFreeSlotsAtMost": 0,
+    "keepDirtItems": ["dirt", "coarse_dirt", "rooted_dirt", "podzol", "mud", "dirt_path", "grass_block"],
+    "keepFood": ["bread", "cooked_beef", "cooked_porkchop", "cooked_chicken", "apple", "carrot", "baked_potato", "golden_carrot"]
+  },
+  "combat": {
+    "enabled": true,
+    "useShield": true,
+    "hostileTypes": ["skeleton", "stray", "bogged", "zombie", "husk", "drowned", "spider", "cave_spider", "creeper", "witch", "pillager", "vindicator", "zombified_piglin", "enderman", "phantom", "zoglin", "hoglin", "warden", "blaze", "slime"],
+    "engageRange": 10,
+    "attackRange": 3,
+    "attackCooldownMs": 600
   },
   "behavior": {
     "reconnectDelayMs": 8000,
     "maxReconnects": 0,
     "refreshMarginSeconds": 600,
-    "antiAfk": true,
-    "antiAfkIntervalMs": 45000,
     "startStaggerMs": 4000
   },
   "proxy": {

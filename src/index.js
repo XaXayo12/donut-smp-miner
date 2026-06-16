@@ -1,14 +1,10 @@
-// 📦 Ce fichier = "le bouton START".
-//    C'est ce qui se lance quand tu double-cliques sur start.bat (ou `npm start`).
-//    Il:
-//       1) demande le MOT DE PASSE du coffre (ou le crée la 1re fois)
-//       2) affiche un MENU simple
-//       3) lance les bots et le tableau de bord
-//
-//    (English: interactive entry point — unlock vault, menu, run bots.)
+// 📦 index.js — the START button.
+//    This runs when you double-click start.bat (or `npm start`). It:
+//      1) asks for the vault master password (or creates it the first time)
+//      2) shows a simple menu
+//      3) starts the bots and the live dashboard
 
 import fs from 'node:fs'
-import path from 'node:path'
 import { select, password as askPassword, input, confirm } from '@inquirer/prompts'
 
 import { loadConfig, paths } from './config/config.js'
@@ -18,42 +14,41 @@ import { inspectMcToken } from './auth/decodeToken.js'
 import { refreshFullChain } from './auth/refresh.js'
 import { BotManager } from './manager/botManager.js'
 import { liveDashboard } from './ui/dashboard.js'
-import { banner, c, hr, dim, colorState } from './ui/theme.js'
+import { banner, c, hr, dim } from './ui/theme.js'
 
 const config = loadConfig()
 const vault = new Vault(paths.vault)
 
-// ---------- Étape coffre ----------
+// ---------- Vault unlock / create ----------
 
 async function unlockOrCreateVault () {
   if (!vault.exists()) {
-    console.log(c.yellow('\n  Première utilisation : créons ton coffre-fort 🔐'))
-    console.log(dim('  Le mot de passe protège TES comptes. Note-le bien : si tu le perds,'))
-    console.log(dim('  personne (même pas ce programme) ne peut récupérer les comptes.\n'))
+    console.log(c.yellow('\n  First run: let\'s create your vault 🔐'))
+    console.log(dim('  This password protects YOUR accounts. Write it down: if you lose it,'))
+    console.log(dim('  nobody (not even this program) can recover the accounts.\n'))
     let pw, pw2
     do {
-      pw = await askPassword({ message: 'Choisis un mot de passe maître :', mask: '*' })
-      pw2 = await askPassword({ message: 'Répète le mot de passe :', mask: '*' })
-      if (pw !== pw2) console.log(c.red('  Les deux mots de passe sont différents, recommence.'))
-      else if (pw.length < 4) { console.log(c.red('  Trop court (min 4).')); pw2 = null }
+      pw = await askPassword({ message: 'Choose a master password:', mask: '*' })
+      pw2 = await askPassword({ message: 'Repeat the password:', mask: '*' })
+      if (pw !== pw2) console.log(c.red('  The two passwords differ, try again.'))
+      else if (pw.length < 4) { console.log(c.red('  Too short (min 4).')); pw2 = null }
     } while (pw !== pw2 || !pw)
     await vault.create(pw)
-    console.log(c.green('  Coffre créé ✓\n'))
+    console.log(c.green('  Vault created ✓\n'))
     return
   }
 
-  // Coffre existant : on demande le mot de passe (3 essais).
   for (let tries = 0; tries < 3; tries++) {
-    const pw = await askPassword({ message: 'Mot de passe du coffre :', mask: '*' })
+    const pw = await askPassword({ message: 'Vault password:', mask: '*' })
     try {
       await vault.open(pw)
-      console.log(c.green('  Coffre ouvert ✓\n'))
+      console.log(c.green('  Vault unlocked ✓\n'))
       return
     } catch (e) {
       console.log(c.red('  ' + e.message))
     }
   }
-  console.log(c.red('  Trop d\'essais. Au revoir.'))
+  console.log(c.red('  Too many attempts. Bye.'))
   process.exit(1)
 }
 
@@ -61,77 +56,77 @@ async function unlockOrCreateVault () {
 
 async function importFlow (presetPath) {
   const p = presetPath || await input({
-    message: 'Chemin du .zip OU du dossier à importer :',
-    validate: (v) => fs.existsSync(v.trim()) ? true : 'Ce chemin n\'existe pas.'
+    message: 'Path to the .zip OR folder to import:',
+    validate: (v) => fs.existsSync(v.trim()) ? true : 'That path does not exist.'
   })
   let imported
   try {
     imported = importFromPath(p.trim())
   } catch (e) {
-    console.log(c.red('  Import impossible : ' + e.message))
+    console.log(c.red('  Import failed: ' + e.message))
     return
   }
   if (!imported.length) {
-    console.log(c.yellow('  Aucun compte trouvé dans ce fichier.'))
+    console.log(c.yellow('  No accounts found in that file.'))
     return
   }
   for (const acc of imported) vault.upsertAccount(acc)
   await vault.save()
-  console.log(c.green(`  ${imported.length} compte(s) importé(s) et sauvegardé(s) ✓`))
+  console.log(c.green(`  Imported & saved ${imported.length} account(s) ✓`))
   for (const a of imported) {
     const info = a.tokenInfo
-    const exp = info ? (info.isExpired ? c.red('jeton PÉRIMÉ') : c.green('jeton valide')) : c.gray('jeton illisible')
-    const rt = a.refreshToken ? c.green('refresh ✓') : c.red('pas de refresh')
+    const exp = info ? (info.isExpired ? c.red('token EXPIRED') : c.green('token valid')) : c.gray('token unreadable')
+    const rt = a.refreshToken ? c.green('refresh ✓') : c.red('no refresh')
     console.log(`   • ${c.bold(a.name || '?')}  ${exp}  ${rt}`)
   }
   console.log('')
 }
 
-// ---------- Liste des comptes ----------
+// ---------- Accounts list ----------
 
 function describeAccount (a) {
-  let tokenState = c.gray('illisible')
+  let tokenState = c.gray('unreadable')
   let detail = ''
   try {
     const info = a.tokenInfo || inspectMcToken(a.mctoken)
     if (info.isExpired) {
-      tokenState = c.red('périmé')
+      tokenState = c.red('expired')
     } else {
-      tokenState = c.green('valide')
+      tokenState = c.green('valid')
       const h = Math.max(0, Math.floor(info.secondsUntilExpiry / 3600))
-      detail = dim(` (expire dans ~${h}h)`)
+      detail = dim(` (expires in ~${h}h)`)
     }
-  } catch { /* illisible */ }
+  } catch { /* unreadable */ }
   const rt = a.refreshToken ? c.green('refresh ✓') : c.red('refresh ✗')
   const proxy = a.proxy ? c.cyan('proxy') : dim('no-proxy')
-  const enabled = a.enabled === false ? c.gray('désactivé') : c.green('activé')
-  return `${c.bold((a.name || '?').padEnd(16))} jeton:${tokenState}${detail}  ${rt}  ${proxy}  ${enabled}`
+  const enabled = a.enabled === false ? c.gray('disabled') : c.green('enabled')
+  return `${c.bold((a.name || '?').padEnd(16))} token:${tokenState}${detail}  ${rt}  ${proxy}  ${enabled}`
 }
 
 function listAccounts () {
   const accounts = vault.getAccounts()
   console.log('\n' + hr())
-  if (!accounts.length) console.log(c.yellow('  (aucun compte — fais "Importer des comptes")'))
+  if (!accounts.length) console.log(c.yellow('  (no accounts — use "Import accounts")'))
   accounts.forEach((a, i) => console.log(`  ${String(i + 1).padStart(2)}. ${describeAccount(a)}`))
   console.log(hr() + '\n')
 }
 
-// ---------- Test / rafraîchissement d'un jeton (en VRAI) ----------
+// ---------- Test / refresh a token (for real) ----------
 
 async function refreshFlow () {
   const accounts = vault.getAccounts()
-  if (!accounts.length) { console.log(c.yellow('  Aucun compte.')); return }
+  if (!accounts.length) { console.log(c.yellow('  No accounts.')); return }
   const choice = await select({
-    message: 'Quel compte veux-tu tester/rafraîchir ?',
+    message: 'Which account do you want to test/refresh?',
     choices: accounts.map(a => ({ name: describeAccountPlain(a), value: a.id }))
   })
   const account = vault.findAccount(choice)
   if (!account.refreshToken) {
-    console.log(c.red('  Ce compte n\'a PAS de refresh token : impossible de le rafraîchir tout seul.'))
-    console.log(dim('  Il faudra réexporter ce compte avec un refresh token pour l\'automatiser.'))
+    console.log(c.red('  This account has NO refresh token: it cannot refresh on its own.'))
+    console.log(dim('  Re-export it with a refresh token to automate it.'))
     return
   }
-  console.log(dim('  Contact de Microsoft → Xbox → Minecraft…'))
+  console.log(dim('  Contacting Microsoft → Xbox → Minecraft…'))
   try {
     const res = await refreshFullChain(account.refreshToken)
     account.mctoken = res.mcToken
@@ -141,78 +136,76 @@ async function refreshFlow () {
     vault.upsertAccount(account)
     await vault.save()
     const info = account.tokenInfo
-    console.log(c.green('  ✓ Nouveau jeton obtenu et sauvegardé !'))
-    console.log(`     pseudo : ${c.bold(res.profile?.name || info.name || '?')}`)
-    console.log(`     valide ~${Math.floor(info.secondsUntilExpiry / 3600)}h (jusqu'au ${new Date(info.expiresAt * 1000).toLocaleString()})`)
+    console.log(c.green('  ✓ New token obtained and saved!'))
+    console.log(`     name  : ${c.bold(res.profile?.name || info.name || '?')}`)
+    console.log(`     valid ~${Math.floor(info.secondsUntilExpiry / 3600)}h (until ${new Date(info.expiresAt * 1000).toLocaleString()})`)
   } catch (e) {
-    console.log(c.red('  ✖ Échec du rafraîchissement : ' + e.message))
-    console.log(dim('  Cause probable : refresh token expiré/révoqué, ou souci Xbox sur ce compte.'))
+    console.log(c.red('  ✖ Refresh failed: ' + e.message))
+    console.log(dim('  Likely cause: refresh token expired/revoked, or an Xbox issue on this account.'))
   }
 }
 
 function describeAccountPlain (a) {
-  let state = 'illisible'
-  try { state = (a.tokenInfo || inspectMcToken(a.mctoken)).isExpired ? 'périmé' : 'valide' } catch {}
-  return `${a.name || '?'}  [jeton ${state}]  [${a.refreshToken ? 'refresh ✓' : 'refresh ✗'}]`
+  let state = 'unreadable'
+  try { state = (a.tokenInfo || inspectMcToken(a.mctoken)).isExpired ? 'expired' : 'valid' } catch {}
+  return `${a.name || '?'}  [token ${state}]  [${a.refreshToken ? 'refresh ✓' : 'refresh ✗'}]`
 }
 
-// ---------- Lancer les bots + tableau de bord ----------
+// ---------- Run bots + dashboard ----------
 
 async function runBots () {
   const accounts = vault.getAccounts().filter(a => a.enabled !== false)
-  if (!accounts.length) { console.log(c.yellow('  Aucun compte activé à lancer.')); return }
+  if (!accounts.length) { console.log(c.yellow('  No enabled accounts to run.')); return }
 
   const manager = new BotManager(vault, config, paths)
   await manager.startAll()
 
   await new Promise((resolve) => {
-    const dash = liveDashboard(manager, config, (isCtrlC) => {
+    const dash = liveDashboard(manager, config, (quitEverything) => {
       dash.stop()
       manager.stopAll()
-      if (isCtrlC) { manager.wipeAll(); process.exit(0) }
+      if (quitEverything) { manager.wipeAll(); process.exit(0) }
       resolve()
     })
   })
 }
 
-// ---------- Menu principal ----------
+// ---------- Main menu ----------
 
 async function mainMenu () {
   for (;;) {
     const action = await select({
-      message: 'Que veux-tu faire ?',
+      message: 'What do you want to do?',
       choices: [
-        { name: '▶  Lancer les bots (tableau de bord en direct)', value: 'run' },
-        { name: '📥  Importer des comptes (.zip ou dossier)', value: 'import' },
-        { name: '📋  Voir mes comptes', value: 'list' },
-        { name: '🔄  Tester / rafraîchir un jeton maintenant', value: 'refresh' },
-        { name: '🚪  Quitter', value: 'quit' }
+        { name: '▶  Run the bots (live dashboard)', value: 'run' },
+        { name: '📥  Import accounts (.zip or folder)', value: 'import' },
+        { name: '📋  List my accounts', value: 'list' },
+        { name: '🔄  Test / refresh a token now', value: 'refresh' },
+        { name: '🚪  Quit', value: 'quit' }
       ]
     })
     if (action === 'run') await runBots()
     else if (action === 'import') await importFlow()
     else if (action === 'list') listAccounts()
     else if (action === 'refresh') await refreshFlow()
-    else if (action === 'quit') { console.log(dim('\n  À bientôt 👋\n')); process.exit(0) }
+    else if (action === 'quit') { console.log(dim('\n  See you 👋\n')); process.exit(0) }
   }
 }
 
-// ---------- Démarrage ----------
+// ---------- Boot ----------
 
 async function main () {
   console.clear()
   console.log(banner())
-  console.log(dim(`\n  Mineur de terre multi-comptes pour DonutSMP — serveur ${config.server.host}\n`))
+  console.log(dim(`\n  Multi-account dirt miner for DonutSMP — server ${config.server.host}\n`))
 
   await unlockOrCreateVault()
 
-  // Support de la ligne de commande : `npm run import -- <chemin>`
   const importArgIndex = process.argv.indexOf('--import')
   if (importArgIndex !== -1) {
     await importFlow(process.argv[importArgIndex + 1])
   } else if (vault.getAccounts().length === 0) {
-    // Coffre vide : on propose tout de suite d'importer.
-    const yes = await confirm({ message: 'Ton coffre est vide. Importer des comptes maintenant ?', default: true })
+    const yes = await confirm({ message: 'Your vault is empty. Import accounts now?', default: true })
     if (yes) await importFlow()
   }
 
@@ -220,6 +213,6 @@ async function main () {
 }
 
 main().catch((e) => {
-  console.error(c.red('\nErreur fatale : ' + e.message))
+  console.error(c.red('\nFatal error: ' + e.message))
   process.exit(1)
 })

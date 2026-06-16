@@ -25,6 +25,7 @@ export function colorState (state) {
     case 'connecting': return chalk.cyan('… connecting')
     case 'reconnecting': return chalk.yellow('↻ reconnecting')
     case 'needs-login': return chalk.red('✖ needs login')
+    case 'done': return chalk.greenBright('✅ done')
     case 'error': return chalk.red('✖ error')
     case 'stopped': return chalk.gray('■ stopped')
     default: return chalk.gray(state || 'idle')

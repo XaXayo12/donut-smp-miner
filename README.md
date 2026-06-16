@@ -1,16 +1,19 @@
 # 🍩 Donut SMP Miner
 
-A clean, multi-account **dirt-mining bot for DonutSMP**, built on the
+A clean, **multi-account, self-sufficient dirt-mining bot for DonutSMP**, built on the
 [GenerelSchwerz fork of mineflayer](https://github.com/GenerelSchwerz/mineflayer)
 (v4.37.1, with the `@nxg-org/mineflayer-physics-util` physics plugin enabled).
 
-It logs in **with tokens** (no password typed anywhere), **refreshes those tokens
-automatically** so you don't have to reconnect by hand, supports **proxies**,
-runs **many accounts at once**, stores everything inside an **encrypted vault**,
-and shows a **live console dashboard**.
+Each bot logs in **with a token** (no password typed anywhere), **refreshes that token
+automatically**, runs through a **proxy**, and is **fully isolated** from the others.
+It even **makes its own tools**: it chops wood, crafts shovels, mines dirt, throws away
+junk, and when its inventory is full of dirt it **leaves the server and reports "done"**.
+It also **defends itself** against hostile mobs and **raises a shield**.
 
-> 🇫🇷 **Tu débutes ? Lis le guide pas-à-pas pour enfant de 5 ans :**
-> [`docs/INSTALLATION_FR.md`](docs/INSTALLATION_FR.md)
+> 🚀 **New here?** Read the step-by-step setup: [`docs/SETUP.md`](docs/SETUP.md)
+> · 🧠 How it works: [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md)
+> · 🔐 Security: [`docs/SECURITE.md`](docs/SECURITE.md)
+> · 🇫🇷 Guide débutant en français : [`docs/INSTALLATION_FR.md`](docs/INSTALLATION_FR.md)
 
 ---
 
@@ -19,61 +22,71 @@ and shows a **live console dashboard**.
 | Feature | What it does |
 |--------|--------------|
 | 🔑 **Token login** | Connects using your Minecraft token — no password, no browser. |
-| 🔄 **Auto token-refresh** | When a token expires (~24h), it's rebuilt automatically from your Microsoft refresh token. No manual reconnect. |
-| 🧑‍🤝‍🧑 **Multi-account** | Run as many accounts as you want, all at once, each with its own state. |
-| 🌐 **Proxy support** | SOCKS5 and HTTP proxies, per-account or rotated across accounts. |
-| 🔐 **Encrypted vault** | All accounts/tokens are encrypted at rest with AES‑256‑GCM behind a master password. |
-| ⛏️ **Dirt mining** | Finds, walks to, and digs dirt-type blocks using `mineflayer-pathfinder`, with safety checks. |
-| 📊 **Live dashboard** | A colored, auto-refreshing table: who's online, blocks mined, health, position. |
-| ♻️ **Auto-reconnect** | Drops are handled automatically with back-off. |
+| 🔄 **Auto token-refresh** | When a token expires (~24h), it's rebuilt automatically from the Microsoft refresh token. |
+| 🧑‍🤝‍🧑 **Heavy multi-account** | Run many accounts at once. **Strict isolation** — separate bot, token cache, proxy and brain per account. One account never disturbs another. |
+| 🌐 **Per-account proxy** | SOCKS5 / HTTP, per-account or rotated. SRV-record aware. |
+| 🪵 **Self-sufficient tools** | Out of shovels? It mines wood → crafts planks → sticks → a crafting table → **a full batch of shovels**, then keeps mining. |
+| 🎒 **Real inventory management** | Periodically checks the **real** inventory, keeps only dirt (+ tools/wood/gear), **drops the junk**, and moves a shovel into the hand. |
+| ✅ **Done & disconnect** | When the inventory is full of dirt, it **logs out** and writes a `done` report (console + `data/reports.log`). |
+| 🛡️ **Self-defense** | Detects hostile mobs (skeletons, zombies, …), **raises a shield**, fights back, and backs away from creepers. |
+| 🔐 **Encrypted vault** | All accounts/tokens encrypted at rest (AES-256-GCM + scrypt) behind a master password. |
+| 📊 **Live dashboard** | Colored, auto-refreshing table: state, dirt mined, HP, position, last action. |
+| ♻️ **Auto-reconnect** | Drops are handled automatically with back-off + token refresh. |
 
 ---
 
 ## 🚀 Quick start
 
 ```bash
-# 1. Install Node.js LTS  →  https://nodejs.org   (one time)
-# 2. From this folder:
 npm install
 npm start
 ```
 
-…or on Windows just **double-click `start.bat`** (it installs everything for you).
+…or on Windows just **double-click `start.bat`**.
 
-On first launch it will:
-1. ask you to **create a master password** (this protects your vault),
-2. offer to **import accounts** (point it at a `.zip` export or a folder),
-3. drop you into a **menu** where you can start the bots.
+On first launch it will: (1) create a **master password**, (2) offer to **import accounts**
+(a `.zip` export or a folder), (3) drop you into a **menu** to start the bots.
 
-Full beginner walkthrough: [`docs/INSTALLATION_FR.md`](docs/INSTALLATION_FR.md) (FR) · architecture: [`docs/COMMENT_CA_MARCHE.md`](docs/COMMENT_CA_MARCHE.md).
+---
+
+## 🧠 The work loop (per bot)
+
+```
+       ┌─ hostile mob nearby? ─────────► DEFEND  (raise shield, attack, flee creepers)
+       │
+       ├─ inventory full of dirt? ─────► DONE    (drop junk, disconnect, report)
+       │
+       ├─ no shovel in hand? ──────────► RESTOCK
+       │        mine wood → planks → sticks → crafting table → craft max shovels
+       │        → move a shovel into the hand
+       │
+       └─ otherwise ───────────────────► MINE one dirt block, keep only dirt
+```
+
+Every step uses **real** mineflayer actions (real digging, real crafting-table windows,
+real item drops, real shield use). Details in [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md).
 
 ---
 
 ## 📁 Project structure
 
 ```
-donut-smp-miner/
-├─ start.bat              ← double-click launcher (Windows)
-├─ package.json
-├─ config/
-│  ├─ config.example.json ← copy of the default settings (documented)
-│  └─ config.json         ← YOUR settings (auto-created, git-ignored)
-├─ data/                  ← 🔒 secrets live here (git-ignored)
-│  ├─ vault.enc           ← encrypted accounts vault
-│  └─ token-cache/        ← per-account auth cache while running
-├─ samples/               ← put your account exports here (git-ignored)
-├─ docs/                  ← documentation (FR, beginner-friendly)
-├─ src/
-│  ├─ index.js            ← entry point (menu + dashboard)
-│  ├─ vault/              ← encryption + vault file
-│  ├─ accounts/           ← import .zip / accounts.txt + cookies
-│  ├─ auth/               ← decode tokens, refresh tokens, seed auth cache
-│  ├─ proxy/              ← SOCKS5 / HTTP proxy
-│  ├─ bot/                ← the mineflayer bot + mining logic
-│  ├─ manager/            ← runs many bots together
-│  ├─ ui/                 ← console theme + live dashboard
-│  └─ config/             ← settings loader
-└─ test/                  ← offline unit tests (`npm test`)
+src/
+├─ index.js            ← entry point (menu + dashboard)
+├─ vault/              ← encryption + vault file
+├─ accounts/           ← import .zip / accounts.txt + cookies
+├─ auth/               ← decode tokens, refresh tokens, seed auth cache
+├─ proxy/              ← SOCKS5 / HTTP proxy (SRV-aware)
+├─ bot/
+│  ├─ createBot.js     ← one managed bot per account (login + reconnect)
+│  ├─ brain.js         ← the decision loop / state machine
+│  ├─ gather.js        ← find → walk → dig → collect drops
+│  ├─ crafting.js      ← logs → planks → sticks → table → shovels
+│  ├─ inventory.js     ← keep dirt, drop junk, equip shovel
+│  └─ combat.js        ← detect hostiles, shield, attack
+├─ manager/            ← runs many bots together + done reports
+├─ ui/                 ← console theme + live dashboard
+└─ config/             ← settings loader
 ```
 
 ---
@@ -84,54 +97,44 @@ Settings live in `config/config.json` (created from the defaults on first run).
 See [`config/config.example.json`](config/config.example.json) for every option.
 Highlights:
 
-- `server.host` / `server.port` — defaults to `donutsmp.net:25565`.
-- `server.version` — `false` means auto-detect.
-- `mining.targetBlocks` — which blocks count as "dirt".
-- `mining.horizontalRadius`, `mining.maxFallDistance` — search + safety.
-- `behavior.refreshMarginSeconds` — refresh tokens this long before expiry.
+- `server.host` / `port` — defaults to `donutsmp.net:25565`. `version: false` = auto-detect.
+- `mining.targetBlocks`, `horizontalRadius`, `maxFallDistance` — what/where to dig + safety.
+- `work.shovelsPerBatch`, `logsNeededPerBatch`, `keepDirtItems`, `fullWhenFreeSlotsAtMost`.
+- `combat.enabled`, `useShield`, `hostileTypes`, `engageRange`, `attackRange`.
 - `proxy.enabled`, `proxy.mode` (`per-account` / `rotate`), `proxy.list`.
 
 ---
 
-## 🔐 Security
+## 🔐 Security (honest)
 
-- Accounts are encrypted with **AES‑256‑GCM**; the key is derived from your
-  master password with **scrypt**. Lose the password → the vault is unrecoverable
-  (by design).
-- `data/`, `config/config.json`, `samples/`, and `*.zip` are **git-ignored** so
-  you never push secrets to GitHub.
-- **Honest limitation:** while a bot is running, `prismarine-auth` needs the token
-  on disk in `data/token-cache/` (plaintext, git-ignored). It's wiped when you
-  quit with `Ctrl+C`. See [`docs/SECURITE.md`](docs/SECURITE.md).
+- Accounts encrypted with **AES-256-GCM**, key derived via **scrypt**. Lose the master
+  password → vault unrecoverable (by design).
+- `data/`, `config/config.json`, `samples/`, `*.zip` are **git-ignored** — secrets never
+  reach GitHub.
+- While a bot runs, `prismarine-auth` needs the token on disk in `data/token-cache/`
+  (plaintext, git-ignored, wiped on `Ctrl+C`). Full notes: [`docs/SECURITE.md`](docs/SECURITE.md).
 
 ---
 
 ## ✅ What has actually been tested (no guessing)
 
-Verified on this machine:
-
 - ✔️ Dependencies install; the mineflayer **fork is v4.37.1 with the nxg physics plugin**.
-- ✔️ **14/14 unit tests pass** (vault encryption, importer, token decode, proxy parsing).
-- ✔️ The **token-refresh chain works for real** against Microsoft → Xbox → Minecraft
-  (tested with the actual exported accounts).
-- ✔️ **mineflayer's own auth path accepts the injected token** and returns a live
-  Minecraft profile for both accounts (queried Mojang's profile API successfully).
+- ✔️ **22/22 unit tests pass** (vault, importer, token decode, proxy, inventory keep/junk, hostile detection).
+- ✔️ The **token-refresh chain works for real** (Microsoft → Xbox → Minecraft, both accounts).
+- ✔️ **mineflayer's auth path accepts the injected token** and returns a live profile for both accounts.
 
-**Not yet tested live (be aware):**
-
-- ❌ The actual in-game connection to DonutSMP and the digging behavior have **not**
-  been run against the live server here (doing so risks the accounts and requires
-  actually joining). The mining code follows the documented mineflayer/pathfinder
-  API but should be validated by you in-game first.
+**Not tested live (be aware):** the in-game connection to DonutSMP and the in-world
+behavior (mining, wood-cutting, crafting, inventory drops, combat/shield) have **not**
+been run against the live server here. The code follows the verified mineflayer /
+pathfinder API but should be validated by you in-game first.
 
 ---
 
 ## ⚠️ Disclaimer
 
-Automation/botting may violate DonutSMP's rules and can get accounts banned.
-Use this on accounts you own and accept the risk. This project is for learning
-and personal automation.
+Automation/botting may violate DonutSMP's rules and can get accounts banned. Use on
+accounts you own and accept the risk. For learning and personal automation.
 
 ## 📜 License
 
-MIT — see `package.json`.
+MIT — see [`LICENSE`](LICENSE).
