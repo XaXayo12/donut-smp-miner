@@ -94,14 +94,17 @@ src/
 ## ⚙️ Configuration
 
 Settings live in `config/config.json` (created from the defaults on first run).
-See [`config/config.example.json`](config/config.example.json) for every option.
-Highlights:
+**📖 Full reference with every option and examples: [`docs/CONFIG.md`](docs/CONFIG.md).**
+Quick highlights:
 
 - `server.host` / `port` — defaults to `donutsmp.net:25565`. `version: false` = auto-detect.
-- `mining.targetBlocks`, `horizontalRadius`, `maxFallDistance` — what/where to dig + safety.
-- `work.shovelsPerBatch`, `logsNeededPerBatch`, `keepDirtItems`, `fullWhenFreeSlotsAtMost`.
-- `combat.enabled`, `useShield`, `hostileTypes`, `engageRange`, `attackRange`.
+- `work.rtpCommand` / `rtpOnStart` — teleport to fresh terrain on spawn (`/rtp overworld`).
+- `mining.maxPitDepth`, `dropCollectRadius`, `sweepEveryBlocks` — mining + drop pickup tuning.
+- `work.shovelsPerBatch`, `keepDirtItems`, `fullWhenFreeSlotsAtMost` — tools, loot, "done".
+- `combat.enabled`, `useShield`, `hostileTypes`, `engageRange` — self-defense.
 - `proxy.enabled`, `proxy.mode` (`per-account` / `rotate`), `proxy.list`.
+
+Changes over time are tracked in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -121,12 +124,13 @@ Highlights:
 - ✔️ Dependencies install; the mineflayer **fork is v4.37.1 with the nxg physics plugin**.
 - ✔️ **22/22 unit tests pass** (vault, importer, token decode, proxy, inventory keep/junk, hostile detection).
 - ✔️ The **token-refresh chain works for real** (Microsoft → Xbox → Minecraft, both accounts).
-- ✔️ **mineflayer's auth path accepts the injected token** and returns a live profile for both accounts.
+- ✔️ **Live on DonutSMP**: token login → survival spawn, **`/rtp overworld`**, continuous
+  dirt mining, self-heal re-/rtp, partial wood→shovel crafting, and self-defense were all
+  observed working against the real server (protocol 774 / MC 1.21.11).
 
-**Not tested live (be aware):** the in-game connection to DonutSMP and the in-world
-behavior (mining, wood-cutting, crafting, inventory drops, combat/shield) have **not**
-been run against the live server here. The code follows the verified mineflayer /
-pathfinder API but should be validated by you in-game first.
+**Honest caveats:** drop pickup is ~50–70% depending on terrain, and wild shovel-crafting
+is best-effort (needs an adjacent tree). Both are tunable (`docs/CONFIG.md`) and don't stop
+the bot from mining. Botting may break server rules — use accounts you own (see Disclaimer).
 
 ---
 
