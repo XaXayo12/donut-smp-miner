@@ -14,10 +14,36 @@ function withTimeout (promise, ms, label) {
   ])
 }
 
+/**
+ * Robust pathfinder.goto: resolves on arrival, rejects on timeout/no-path, and
+ * ALWAYS cancels the underlying goal so the next path can't collide with a
+ * still-running one (the cause of "goal was changed" spam). Late rejections from
+ * the cancelled goal are swallowed.
+ */
+export function safeGoto (bot, goal, ms = 10000) {
+  return new Promise((resolve, reject) => {
+    let done = false
+    const finish = (ok, err) => {
+      if (done) return
+      done = true
+      ok ? resolve('moved') : reject(err)
+    }
+    const p = bot.pathfinder.goto(goal)
+    p.then(() => finish(true), (e) => finish(false, e)) // handles late rejection
+    setTimeout(() => {
+      if (done) return
+      try { bot.pathfinder.setGoal(null) } catch { /* ignore */ }
+      finish(false, new Error('timeout'))
+    }, ms)
+  })
+}
+
 // Is this entity a dropped item lying on the ground?
+// (Avoid the deprecated entity.objectType getter — it spams warnings.)
 function isItemDrop (bot, e) {
   if (!e || !e.position) return false
-  return e.name === 'item' || e.objectType === 'Item' ||
+  return e.name === 'item' ||
+    e.displayName === 'Item' ||
     e.entityType === bot.registry.entitiesByName?.item?.id
 }
 
@@ -55,30 +81,48 @@ export function blockIdsBySuffix (bot, suffixes) {
 }
 
 /**
- * Mine ONE block matching `ids`, then collect its drop.
- * @returns {boolean} true if a block was mined
+ * Mine ONE block matching `ids`.
+ * Strategy learned from live testing:
+ *   1. If a target block is already in reach → dig it directly (NO pathfinding).
+ *      This is fast and avoids the pathfinder timing out on dig-paths.
+ *   2. Otherwise WALK toward the nearest target (cheap path, no digging) so the
+ *      next call can dig it in reach.
+ * @returns {'dug'|'moved'|'none'}
  */
 export async function mineOne (bot, ids, { maxDistance = 24, digTimeoutMs = 12000, isSafe } = {}, log = () => {}) {
-  const positions = bot.findBlocks({ matching: ids, maxDistance, count: 40 })
-  for (const pos of positions) {
-    const block = bot.blockAt(pos)
-    if (!block) continue
-    if (isSafe && !isSafe(block)) continue
+  const safe = (b) => !isSafe || isSafe(b)
+
+  // Phase 1 — dig the NEAREST block we can reach (close, so the drop lands at
+  // our feet and gets auto-picked-up instead of left behind).
+  const inReach = bot.findBlock({
+    matching: ids,
+    maxDistance: 3,
+    useExtraInfo: (b) => safe(b) && bot.canDigBlock(b)
+  })
+  if (inReach) {
     try {
-      await withTimeout(
-        bot.pathfinder.goto(new GoalNear(pos.x, pos.y, pos.z, 1)),
-        digTimeoutMs, 'travel'
-      )
-      const fresh = bot.blockAt(pos)
-      if (!fresh || fresh.boundingBox === 'empty') continue
-      await withTimeout(bot.dig(fresh), digTimeoutMs, 'dig')
-      await collectNearbyDrops(bot, 6, 4000)
-      return true
+      // Smooth, human-like aim at a slightly randomized point on the block,
+      // let the head settle, then dig (the dig's look is a tiny final correction).
+      const r = () => (Math.random() - 0.5) * 0.5
+      await bot.lookAt(inReach.position.offset(0.5 + r(), 0.5 + r(), 0.5 + r()), false)
+      await sleep(120)
+      await withTimeout(bot.dig(inReach, true), digTimeoutMs, 'dig')
+      await collectNearbyDrops(bot, 5, 2500)
+      return 'dug'
     } catch (e) {
-      log('skip block (' + e.message + ')')
+      log('dig (in reach) failed: ' + e.message)
     }
   }
-  return false
+
+  // Phase 2 — walk toward the nearest target so we can dig it next time.
+  const near = bot.findBlock({ matching: ids, maxDistance, useExtraInfo: (b) => safe(b) })
+  if (!near) return 'none'
+  try {
+    await safeGoto(bot, new GoalNear(near.position.x, near.position.y, near.position.z, 2), digTimeoutMs)
+    return 'moved'
+  } catch {
+    return 'none'
+  }
 }
 
 /**
@@ -91,9 +135,9 @@ export async function gatherUntil (bot, ids, { count, maxDistance, digTimeoutMs,
   let stuck = 0
   while (countItems() < count) {
     if (!hooks.shouldContinue || hooks.shouldContinue()) {
-      const ok = await mineOne(bot, ids, { maxDistance, digTimeoutMs, isSafe }, log)
+      const r = await mineOne(bot, ids, { maxDistance, digTimeoutMs, isSafe }, log)
       onProgress(countItems())
-      if (!ok) {
+      if (r === 'none') {
         stuck++
         if (stuck >= 3) { log('nothing reachable to gather'); return false }
         await sleep(1500)

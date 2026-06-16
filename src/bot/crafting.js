@@ -8,8 +8,9 @@
 
 import pathfinderPkg from 'mineflayer-pathfinder'
 const { goals } = pathfinderPkg
-const { GoalNear, GoalPlaceBlock } = goals
+const { GoalNear } = goals
 import { Vec3 } from 'vec3'
+import { safeGoto } from './gather.js'
 
 const FACES = [
   new Vec3(0, 1, 0), new Vec3(0, -1, 0),
@@ -154,7 +155,7 @@ export async function craftShovels (bot, tier, maxCount, log) {
   if (!table) return 0
 
   // Walk close to the table so the window opens reliably.
-  try { await bot.pathfinder.goto(new GoalNear(table.position.x, table.position.y, table.position.z, 2)) } catch { /* ignore */ }
+  try { await safeGoto(bot, new GoalNear(table.position.x, table.position.y, table.position.z, 2), 8000) } catch { /* ignore */ }
 
   const made = await craftItemType(bot, shovelType, maxCount, table, log)
   return made

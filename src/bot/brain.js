@@ -1,16 +1,19 @@
 // 📦 brain.js — the bot's decision loop (state machine).
 //
-//   The cycle, repeated forever until the inventory is full of dirt:
+//   Lessons from LIVE testing on DonutSMP:
+//     • The dirt-mining area has holes/walls everywhere → navigation must be
+//       allowed to dig, or the bot gets physically trapped and never moves.
+//     • There are usually NO trees near the dirt spawn, and long-range pathing
+//       to find one is slow/unreliable. So we NEVER stop mining to chase wood:
+//       the bot mines dirt with a shovel if it has one, otherwise by hand, and
+//       only crafts shovels when a tree is right next to it.
 //
-//     ┌─ enemy nearby? ─────────────► DEFEND (shield + attack), then resume
-//     │
-//     ├─ inventory full of dirt? ───► DONE (drop junk, disconnect, report)
-//     │
-//     ├─ no shovel in hand? ────────► RESTOCK
-//     │        (mine wood → craft planks → sticks → table → max shovels →
-//     │         move a shovel into the hand)
-//     │
-//     └─ otherwise ─────────────────► MINE one dirt block, keep only dirt
+//   Priority each cycle:
+//     1. DEFEND if a hostile mob is near (shield + attack).
+//     2. DONE   if the inventory is full of dirt → disconnect + report.
+//     3. SHOVEL prefer one (equip from inventory; craft only if a tree is
+//        adjacent) — but never block mining.
+//     4. MINE   one dirt block in reach, smoothly (strip-mine, no deep pits).
 //
 //   Each account runs its OWN brain on its OWN bot — nothing is shared.
 
@@ -26,6 +29,7 @@ import {
 } from './inventory.js'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+const jitter = (base, amt) => Math.max(0, base + Math.floor((Math.random() - 0.5) * amt))
 
 export function startBrain (bot, config, hooks = {}) {
   const W = config.work
@@ -38,13 +42,18 @@ export function startBrain (bot, config, hooks = {}) {
   let running = true
   let mined = 0
   let blocksSinceTidy = 0
+  let nextWoodTry = 0 // cooldown so we don't keep trying to craft when it fails
+  let lastProgressAt = Date.now() // for the "stuck → re-/rtp" self-heal
+  const reRtpMs = Math.max(10, W.reRtpWhenStuckSeconds || 30) * 1000
 
-  // Per-bot movement settings (isolated to THIS bot).
+  // Navigation may dig (terrain is full of holes here); mining is reach-first.
   if (!bot.pathfinder) bot.loadPlugin(pathfinder)
   const movements = new Movements(bot)
   movements.canDig = true
+  movements.allow1by1towers = true
   movements.scafoldingBlocks = [] // never place our hard-won dirt as scaffolding
   bot.pathfinder.setMovements(movements)
+  bot.pathfinder.thinkTimeout = 4000
 
   const combat = new Combat(bot, config, log)
   const keep = makeKeepPredicate(config)
@@ -53,8 +62,11 @@ export function startBrain (bot, config, hooks = {}) {
   const woodIds = () => blockIdsBySuffix(bot, ['_log'])
   const countLogs = () => bot.inventory.items().filter(i => i.name.endsWith('_log')).reduce((s, i) => s + i.count, 0)
 
-  // Don't dig a block if it would drop us into a hole deeper than allowed.
+  // Strip-mine safety: only dig at/around feet (no deep pit), and never over a
+  // drop bigger than maxFallDistance.
   function isSafe (block) {
+    const feetY = Math.floor(bot.entity.position.y)
+    if (block.position.y < feetY - 1) return false
     if (!M.reachOnly) return true
     let depth = 0
     let p = block.position.offset(0, -1, 0)
@@ -71,81 +83,128 @@ export function startBrain (bot, config, hooks = {}) {
     blocksSinceTidy = 0
   }
 
-  // Gather wood and craft a fresh batch of shovels.
-  async function restockShovels () {
-    onStatus('out of shovels → restocking')
-
-    // 1) make sure we have enough logs
-    if (countLogs() < W.logsNeededPerBatch) {
-      onStatus('mining wood')
-      try { await bot.unequip('hand') } catch { /* punch with bare hand */ }
-      let tries = 0
-      while (running && countLogs() < W.logsNeededPerBatch) {
-        if (combat.threatNear()) { await combat.engage(() => running); continue }
-        const ok = await mineOne(bot, woodIds(), { maxDistance: W.woodSearchRadius, digTimeoutMs: M.digTimeoutMs }, log)
-        if (!ok) {
-          if (++tries >= 4) { onStatus('no wood found nearby'); return false }
-          await sleep(1500)
-        }
-      }
+  // Chop adjacent wood + craft a batch of shovels. Only called when a tree is
+  // basically next to us, so it stays quick. Returns true if we hold a shovel.
+  async function chopAndCraft () {
+    onStatus('🌳 a tree is here → making shovels')
+    let idle = 0
+    while (running && countLogs() < W.logsNeededPerBatch && idle < 3) {
+      if (combat.threatNear()) { await combat.engage(() => running); continue }
+      const r = await mineOne(bot, woodIds(), { maxDistance: 6, digTimeoutMs: 6000 }, log)
+      if (r === 'none') idle++
+      else { idle = 0; await sleep(jitter(180, 120)) }
     }
-
-    // 2) craft as many shovels as the wood allows
-    onStatus('crafting shovels')
+    if (countLogs() === 0) return false
+    onStatus('🪓 crafting shovels')
     try {
       const made = await craftShovels(bot, W.shovelTier, W.shovelsPerBatch, log)
-      onStatus(made > 0 ? `crafted ${made} shovel(s)` : 'crafting produced no shovel')
-    } catch (e) {
-      log('crafting failed: ' + e.message)
-    }
+      onStatus(made > 0 ? `crafted ${made} shovel(s) ✓` : 'crafting produced no shovel')
+    } catch (e) { log('crafting failed: ' + e.message) }
     await collectNearbyDrops(bot, 4, 2000)
-
-    // 3) move one into the hand
     return equipShovelToHand(bot, log)
   }
 
+  // One decision cycle.
+  async function step () {
+    // 1) DEFEND first.
+    if (combat.threatNear()) {
+      onStatus('⚔ defending')
+      lastProgressAt = Date.now() // fighting counts as "not stuck"
+      await combat.engage(() => running)
+      return
+    }
+
+    // 2) DONE — inventory full of dirt.
+    if (isInventoryFull(bot, config)) {
+      await tidyInventory()
+      if (isInventoryFull(bot, config)) {
+        const report = { mined, dirt: dirtCount(bot, config), name: bot.username }
+        onStatus(`✅ DONE — ${report.dirt} dirt collected`)
+        onDone(report)
+        running = false
+        return
+      }
+    }
+
+    // 2b) SELF-HEAL — no dirt progress for a while means this spot is bad
+    // (wrong biome, water, unreachable terrain). Teleport somewhere fresh.
+    if (Date.now() - lastProgressAt > reRtpMs) {
+      onStatus('⌛ no progress here → teleporting to a fresh spot')
+      await teleportToFreshArea()
+      lastProgressAt = Date.now()
+      return
+    }
+
+    // 3) SHOVEL — prefer one, but NEVER stop mining to chase wood.
+    if (!hasShovelInHand(bot)) {
+      if (!(await equipShovelToHand(bot, log))) {
+        // Craft only if a tree is right next to us (no wandering off).
+        const treeAdjacent = bot.findBlock({ matching: woodIds(), maxDistance: 6 })
+        if (treeAdjacent && Date.now() >= nextWoodTry) {
+          // Set the cooldown FIRST so an interrupted attempt can't retry-loop,
+          // and hard-time-box the whole attempt so it never starves mining.
+          nextWoodTry = Date.now() + 90000
+          lastProgressAt = Date.now() // crafting is productive, not "stuck"
+          try { await withTimeout(chopAndCraft(), 16000, 'craft budget') } catch (e) { log('craft attempt ended (' + e.message + ')') }
+          try { bot.pathfinder.setGoal(null) } catch { /* ignore */ }
+        }
+      }
+      // fall through → mine dirt with the shovel if we got one, else by hand
+    }
+
+    // 4) periodic tidy so junk never clogs the inventory
+    if (blocksSinceTidy >= W.tidyEveryBlocks) await tidyInventory()
+
+    // 5) MINE one dirt block in reach (smooth).
+    onStatus(hasShovelInHand(bot) ? '⛏ mining dirt (shovel)' : '⛏ mining dirt (by hand)')
+    const r = await mineOne(bot, dirtIds(), { maxDistance: M.horizontalRadius, digTimeoutMs: M.digTimeoutMs, isSafe }, log)
+    if (r === 'dug') {
+      mined++; blocksSinceTidy++; onMine(mined)
+      lastProgressAt = Date.now() // real progress → not stuck
+      await sleep(jitter(M.pauseBetweenBlocksMs + 100, 160)) // human reaction pause
+    } else if (r === 'moved') {
+      await sleep(jitter(100, 80))
+    } else {
+      onStatus('no dirt in reach, repositioning'); await sleep(jitter(700, 300))
+    }
+  }
+
+  // Teleport to a fresh, untouched area so there's real dirt + trees nearby.
+  // We stand still while the server runs its teleport warmup, then wait for the
+  // big position jump + new chunks.
+  async function teleportToFreshArea (initial = false) {
+    if (!W.rtpCommand) return false
+    if (initial && !W.rtpOnStart) return false
+    onStatus('🌀 ' + W.rtpCommand)
+    try { bot.pathfinder.setGoal(null) } catch { /* ignore */ }
+    const before = bot.entity.position.clone()
+    try { bot.chat(W.rtpCommand) } catch { /* ignore */ }
+    const start = Date.now()
+    while (running && Date.now() - start < W.rtpWaitMs) {
+      await sleep(500)
+      if (bot.entity.position.distanceTo(before) > 64) {
+        onStatus('🌀 teleported to fresh terrain')
+        await sleep(2500) // let the new chunks load
+        lastProgressAt = Date.now()
+        return true
+      }
+    }
+    onStatus('teleport did not happen (cooldown?) — trying again shortly')
+    return false
+  }
+
   async function loop () {
+    await sleep(2500) // let chunks load before scanning
+    await teleportToFreshArea(true)
+    lastProgressAt = Date.now()
     while (running) {
       try {
-        // 1) DEFEND first — survival beats mining.
-        if (combat.threatNear()) {
-          onStatus('⚔ defending')
-          await combat.engage(() => running)
-          continue
-        }
-
-        // 2) DONE — inventory is basically all dirt.
-        if (isInventoryFull(bot, config)) {
-          await tidyInventory() // make sure it's really dirt, not junk
-          if (isInventoryFull(bot, config)) {
-            const report = { mined, dirt: dirtCount(bot, config), name: bot.username }
-            onStatus(`✅ DONE — ${report.dirt} dirt collected`)
-            onDone(report)
-            running = false
-            break
-          }
-        }
-
-        // 3) RESTOCK — need a shovel in hand.
-        if (!hasShovelInHand(bot)) {
-          if (!(await equipShovelToHand(bot, log))) {
-            const ok = await restockShovels()
-            if (!ok) { await sleep(2500); continue } // try again next cycle
-          }
-        }
-
-        // 4) periodic tidy so junk never clogs the inventory
-        if (blocksSinceTidy >= W.tidyEveryBlocks) await tidyInventory()
-
-        // 5) MINE one dirt block
-        onStatus('mining dirt')
-        const ok = await mineOne(bot, dirtIds(), { maxDistance: M.horizontalRadius, digTimeoutMs: M.digTimeoutMs, isSafe }, log)
-        if (ok) { mined++; blocksSinceTidy++; onMine(mined) } else { onStatus('no dirt in reach, waiting'); await sleep(2000) }
-
-        if (M.pauseBetweenBlocksMs > 0) await sleep(M.pauseBetweenBlocksMs)
+        // Watchdog: a single cycle may never hang the bot.
+        await withTimeout(step(), 25000, 'cycle watchdog')
       } catch (e) {
-        log('brain error: ' + e.message)
-        await sleep(1500)
+        log('cycle reset (' + e.message + ')')
+        try { bot.pathfinder.setGoal(null) } catch { /* ignore */ }
+        await sleep(600)
       }
     }
   }
@@ -159,6 +218,13 @@ export function startBrain (bot, config, hooks = {}) {
     },
     get mined () { return mined }
   }
+}
+
+function withTimeout (promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(label || 'timeout')), ms))
+  ])
 }
 
 export default { startBrain }
