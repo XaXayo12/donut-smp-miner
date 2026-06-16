@@ -25,11 +25,18 @@ export const DEFAULTS = {
     pauseBetweenBlocksMs: 150 // small human-like pause between blocks
   },
   work: {
+    // Teleport to a FRESH area on arrival (untouched dirt + real trees).
+    // DonutSMP: "/rtp overworld". Set rtpOnStart:false to stay at spawn.
+    rtpOnStart: true,
+    rtpCommand: '/rtp overworld',
+    rtpWaitMs: 14000, // how long to wait for the teleport to happen
+    reRtpWhenStuckSeconds: 30, // bad spot (wrong biome/water)? teleport again
     // The self-sufficient tool loop (wood -> shovels).
     shovelTier: 'wooden', // which shovel to craft: wooden/stone/iron…
     shovelsPerBatch: 6, // craft up to this many per restock ("max shovels")
     logsNeededPerBatch: 4, // mine at least this many logs before crafting
     woodSearchRadius: 48, // how far to look for trees
+    woodBudgetMs: 12000, // max time spent trying to fetch wood before mining by hand
     tidyEveryBlocks: 16, // open inventory & drop junk every N dirt blocks
     fullWhenFreeSlotsAtMost: 0, // "inventory full" once free slots <= this -> disconnect
     // What we KEEP (the loot). Everything else is junk and gets dropped.
