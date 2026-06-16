@@ -26,8 +26,9 @@ samples/*
 # Dossier d'inspection temporaire.
 _inspect/
 
-# ---- Reglages locaux de l'outil ----
-.claude/settings.local.json
+# ---- Editor / tool local settings ----
+.vscode/
+.idea/
 
 # ---- Divers ----
 *.log
