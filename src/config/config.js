@@ -1,8 +1,6 @@
-// 📦 Ce fichier = le "lecteur de réglages".
-//    Il lit config/config.json (tes réglages). Si un réglage manque, il met
-//    une valeur par défaut raisonnable. Tu n'es jamais bloqué.
-//
-//    (English: loads config/config.json and fills missing values with defaults.)
+// 📦 config.js — settings loader.
+//    Reads config/config.json (your settings). Missing values fall back to the
+//    defaults below, so you're never blocked. Edit config/config.json to tune.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -11,43 +9,64 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..', '..')
 
-// Réglages par défaut. Tu peux TOUT changer dans config/config.json.
 export const DEFAULTS = {
   server: {
-    host: 'donutsmp.net', // l'adresse du serveur DonutSMP
+    host: 'donutsmp.net', // the DonutSMP address
     port: 25565,
-    version: false // false = mineflayer devine la version automatiquement
+    version: false // false = mineflayer auto-detects the version
   },
   mining: {
-    // Les blocs considérés comme "terre" à miner.
+    // Blocks treated as "dirt" to mine.
     targetBlocks: ['dirt', 'grass_block', 'coarse_dirt', 'rooted_dirt', 'dirt_path', 'podzol', 'mud'],
-    horizontalRadius: 16, // cherche la terre dans ce rayon (blocs) autour du bot
-    maxFallDistance: 3, // ne creuse pas un trou plus profond que ça sous soi
-    digTimeoutMs: 10000, // abandonne un bloc s'il met trop de temps
-    reachOnly: true, // ne mine que les blocs atteignables sans tomber dans le vide
-    pauseBetweenBlocksMs: 150 // petite pause humaine entre 2 blocs
+    horizontalRadius: 16, // search radius (blocks) around the bot for dirt
+    maxFallDistance: 3, // don't dig a block that would drop us deeper than this
+    digTimeoutMs: 12000, // give up on a block if it takes too long
+    reachOnly: true, // only dig blocks we can reach without falling into the void
+    pauseBetweenBlocksMs: 150 // small human-like pause between blocks
+  },
+  work: {
+    // The self-sufficient tool loop (wood -> shovels).
+    shovelTier: 'wooden', // which shovel to craft: wooden/stone/iron…
+    shovelsPerBatch: 6, // craft up to this many per restock ("max shovels")
+    logsNeededPerBatch: 4, // mine at least this many logs before crafting
+    woodSearchRadius: 48, // how far to look for trees
+    tidyEveryBlocks: 16, // open inventory & drop junk every N dirt blocks
+    fullWhenFreeSlotsAtMost: 0, // "inventory full" once free slots <= this -> disconnect
+    // What we KEEP (the loot). Everything else is junk and gets dropped.
+    keepDirtItems: ['dirt', 'coarse_dirt', 'rooted_dirt', 'podzol', 'mud', 'dirt_path', 'grass_block'],
+    keepFood: ['bread', 'cooked_beef', 'cooked_porkchop', 'cooked_chicken', 'apple', 'carrot', 'baked_potato', 'golden_carrot']
+  },
+  combat: {
+    enabled: true,
+    useShield: true, // raise a shield (if the account owns one) vs arrows/melee
+    hostileTypes: [
+      'skeleton', 'stray', 'bogged', 'zombie', 'husk', 'drowned', 'spider', 'cave_spider',
+      'creeper', 'witch', 'pillager', 'vindicator', 'zombified_piglin', 'enderman', 'phantom',
+      'zoglin', 'hoglin', 'warden', 'blaze', 'slime'
+    ],
+    engageRange: 10, // start defending when a hostile is this close
+    attackRange: 3, // melee range
+    attackCooldownMs: 600 // wait between swings (full-damage hits)
   },
   behavior: {
-    reconnectDelayMs: 8000, // attente avant de se reconnecter après une déco
-    maxReconnects: 0, // 0 = illimité
-    refreshMarginSeconds: 600, // rafraîchit le jeton 10 min AVANT qu'il expire
-    antiAfk: true, // petits mouvements pour ne pas être kické "AFK"
-    antiAfkIntervalMs: 45000,
-    startStaggerMs: 4000 // décalage entre le démarrage de chaque compte
+    reconnectDelayMs: 8000, // wait before reconnecting after a drop
+    maxReconnects: 0, // 0 = unlimited
+    refreshMarginSeconds: 600, // refresh tokens this long before they expire
+    startStaggerMs: 4000 // delay between starting each account
   },
   proxy: {
-    enabled: false, // mettre true pour utiliser les proxys
-    // mode 'per-account' = chaque compte garde son proxy (champ account.proxy)
-    // mode 'rotate'      = on distribue la liste ci-dessous aux comptes
+    enabled: false, // set true to use proxies
+    // 'per-account' = each account keeps its own account.proxy
+    // 'rotate'      = distribute the list below across accounts
     mode: 'per-account',
-    list: [] // ex: ["socks5://user:pass@1.2.3.4:1080", "1.2.3.4:1081"]
+    list: [] // e.g. ["socks5://user:pass@1.2.3.4:1080", "1.2.3.4:1081"]
   },
   console: {
-    refreshMs: 1000 // fréquence de rafraîchissement du tableau de bord
+    refreshMs: 1000 // dashboard refresh rate
   }
 }
 
-// Fusion "profonde" simple: les valeurs de l'utilisateur écrasent les défauts.
+// Shallow-ish deep merge: user values override defaults.
 function deepMerge (base, extra) {
   const out = Array.isArray(base) ? [...base] : { ...base }
   for (const k of Object.keys(extra || {})) {
@@ -64,7 +83,7 @@ export function configPath () {
   return path.join(ROOT, 'config', 'config.json')
 }
 
-/** Charge la config (avec les défauts). Crée le fichier s'il n'existe pas. */
+/** Load config (with defaults). Creates the file if missing. */
 export function loadConfig () {
   const file = configPath()
   let user = {}
@@ -72,7 +91,7 @@ export function loadConfig () {
     try {
       user = JSON.parse(fs.readFileSync(file, 'utf8'))
     } catch (e) {
-      throw new Error(`config/config.json est mal écrit (JSON invalide): ${e.message}`)
+      throw new Error(`config/config.json is invalid JSON: ${e.message}`)
     }
   } else {
     fs.mkdirSync(path.dirname(file), { recursive: true })
