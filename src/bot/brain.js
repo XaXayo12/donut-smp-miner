@@ -44,6 +44,7 @@ export function startBrain (bot, config, hooks = {}) {
   let blocksSinceTidy = 0
   let nextWoodTry = 0 // cooldown so we don't keep trying to craft when it fails
   let lastProgressAt = Date.now() // for the "stuck → re-/rtp" self-heal
+  let surfaceY = 0 // local ground level; capped pit depth keeps us near our drops
   const reRtpMs = Math.max(10, W.reRtpWhenStuckSeconds || 30) * 1000
 
   // Navigation may dig (terrain is full of holes here); mining is reach-first.
@@ -66,7 +67,8 @@ export function startBrain (bot, config, hooks = {}) {
   // drop bigger than maxFallDistance.
   function isSafe (block) {
     const feetY = Math.floor(bot.entity.position.y)
-    if (block.position.y < feetY - 1) return false
+    if (block.position.y < feetY - 1) return false // no big single drop
+    if (block.position.y < surfaceY - M.maxPitDepth) return false // stay shallow
     if (!M.reachOnly) return true
     let depth = 0
     let p = block.position.offset(0, -1, 0)
@@ -157,12 +159,16 @@ export function startBrain (bot, config, hooks = {}) {
 
     // 5) MINE one dirt block in reach (smooth).
     onStatus(hasShovelInHand(bot) ? '⛏ mining dirt (shovel)' : '⛏ mining dirt (by hand)')
-    const r = await mineOne(bot, dirtIds(), { maxDistance: M.horizontalRadius, digTimeoutMs: M.digTimeoutMs, isSafe }, log)
+    const r = await mineOne(bot, dirtIds(), { maxDistance: M.horizontalRadius, digTimeoutMs: M.digTimeoutMs, isSafe, collectRadius: M.dropCollectRadius }, log)
     if (r === 'dug') {
       mined++; blocksSinceTidy++; onMine(mined)
       lastProgressAt = Date.now() // real progress → not stuck
+      // Amortized drop sweep: every few blocks, vacuum up scattered drops in one
+      // pass (cheaper than walking to each drop individually).
+      if (mined % M.sweepEveryBlocks === 0) await collectNearbyDrops(bot, M.sweepRadius, 2500)
       await sleep(jitter(M.pauseBetweenBlocksMs + 100, 160)) // human reaction pause
     } else if (r === 'moved') {
+      surfaceY = Math.floor(bot.entity.position.y) // new local surface after walking
       await sleep(jitter(100, 80))
     } else {
       onStatus('no dirt in reach, repositioning'); await sleep(jitter(700, 300))
@@ -186,6 +192,7 @@ export function startBrain (bot, config, hooks = {}) {
         onStatus('🌀 teleported to fresh terrain')
         await sleep(2500) // let the new chunks load
         lastProgressAt = Date.now()
+        surfaceY = Math.floor(bot.entity.position.y)
         return true
       }
     }
@@ -197,6 +204,7 @@ export function startBrain (bot, config, hooks = {}) {
     await sleep(2500) // let chunks load before scanning
     await teleportToFreshArea(true)
     lastProgressAt = Date.now()
+    surfaceY = Math.floor(bot.entity.position.y)
     while (running) {
       try {
         // Watchdog: a single cycle may never hang the bot.

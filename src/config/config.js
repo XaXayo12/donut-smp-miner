@@ -20,9 +20,14 @@ export const DEFAULTS = {
     targetBlocks: ['dirt', 'grass_block', 'coarse_dirt', 'rooted_dirt', 'dirt_path', 'podzol', 'mud'],
     horizontalRadius: 16, // search radius (blocks) around the bot for dirt
     maxFallDistance: 3, // don't dig a block that would drop us deeper than this
+    maxPitDepth: 2, // never dig more than this far below the local surface (stay
+    // shallow so the bot strip-mines sideways and stays near its drops)
     digTimeoutMs: 12000, // give up on a block if it takes too long
     reachOnly: true, // only dig blocks we can reach without falling into the void
-    pauseBetweenBlocksMs: 150 // small human-like pause between blocks
+    pauseBetweenBlocksMs: 150, // small human-like pause between blocks
+    dropCollectRadius: 2.5, // only pick up drops within this radius (no far chasing)
+    sweepEveryBlocks: 6, // every N dirt blocks, vacuum up scattered drops in one pass
+    sweepRadius: 4 // how far that sweep reaches
   },
   work: {
     // Teleport to a FRESH area on arrival (untouched dirt + real trees).
@@ -34,7 +39,7 @@ export const DEFAULTS = {
     // The self-sufficient tool loop (wood -> shovels).
     shovelTier: 'wooden', // which shovel to craft: wooden/stone/iron…
     shovelsPerBatch: 6, // craft up to this many per restock ("max shovels")
-    logsNeededPerBatch: 4, // mine at least this many logs before crafting
+    logsNeededPerBatch: 2, // logs to gather before crafting (a small tree is enough)
     woodSearchRadius: 48, // how far to look for trees
     woodBudgetMs: 12000, // max time spent trying to fetch wood before mining by hand
     tidyEveryBlocks: 16, // open inventory & drop junk every N dirt blocks
