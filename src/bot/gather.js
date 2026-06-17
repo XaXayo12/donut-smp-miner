@@ -166,6 +166,10 @@ export async function mineOne (bot, ids, { maxDistance = 24, digTimeoutMs = 1200
   if (adj) {
     try {
       await faceAndDig(bot, adj, digTimeoutMs)
+      // HONEST CHECK: confirm the block ACTUALLY broke. Under server rubber-band
+      // the dig can "resolve" without removing the block — don't count those.
+      const after = bot.blockAt(adj.position)
+      if (after && idSet.has(after.type)) { log('dig did not break the block (rubber-band?)'); return 'none' }
       await collectClose(bot, collectRadius)
       return 'dug'
     } catch (e) {

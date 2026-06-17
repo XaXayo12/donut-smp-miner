@@ -41,7 +41,8 @@
     ],
     "engageRange": 10,
     "attackRange": 3,
-    "attackCooldownMs": 600
+    "attackCooldownMs": 600,
+    "fleeHealth": 8
   },
   "behavior": {
     "reconnectDelayMs": 8000,

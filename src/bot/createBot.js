@@ -13,6 +13,8 @@ import physicsUtil from '@nxg-org/mineflayer-physics-util' // default export = l
 import { startBrain } from './brain.js'
 import { makeConnect, parseProxy } from '../proxy/proxy.js'
 import { seedAuthCache, readBackRefreshToken, readBackMcToken, wipeAuthCache } from '../auth/seedCache.js'
+import { refreshFullChain } from '../auth/refresh.js'
+import { inspectMcToken } from '../auth/decodeToken.js'
 
 const AUTH_TITLE = '00000000402b5328' // Titles.MinecraftJava — matches the token "aid" field
 
@@ -62,12 +64,18 @@ export class ManagedBot extends EventEmitter {
     if (this.brain) { this.brain.stop(); this.brain = null }
   }
 
-  _connect () {
+  async _connect () {
     if (!this.shouldRun) return
     this._cleanup()
     this.setState('connecting', 'connecting…')
 
-    // 1) Pre-fill the auth cache with OUR token + refresh token.
+    // 0) Make sure we hold a FRESH Minecraft token. We refresh via our OWN chain
+    // (refresh.js) rather than letting prismarine-auth do it, because its 'live'
+    // flow forces an Xbox *title* auth that DonutSMP/Xbox rejects with 403. By
+    // injecting a fresh token, prismarine-auth uses it directly and never refreshes.
+    await this._ensureFreshToken()
+
+    // 1) Pre-fill the auth cache with our (now fresh) token + refresh token.
     const info = this.account.tokenInfo || {}
     seedAuthCache({
       folder: this.tokenCacheDir,
@@ -105,6 +113,46 @@ export class ManagedBot extends EventEmitter {
 
     this.bot = bot
     this._wire(bot)
+  }
+
+  // True if the current token is missing or expires within the refresh margin.
+  _tokenExpiringSoon () {
+    if (!this.account.mctoken) return true
+    try {
+      const info = inspectMcToken(this.account.mctoken)
+      return info.secondsUntilExpiry < (this.config.behavior.refreshMarginSeconds || 600)
+    } catch { return true }
+  }
+
+  // Refresh the Minecraft token via our own chain (if expiring) and persist the
+  // rotated refresh token. Safe to call every connect — it's a no-op when valid.
+  async _ensureFreshToken () {
+    if (!this._tokenExpiringSoon()) return
+    if (!this.account.refreshToken) return // nothing we can do; login may need manual re-auth
+    try {
+      this.setState('connecting', 'refreshing token…')
+      const fresh = await refreshFullChain(this.account.refreshToken)
+      this.account.mctoken = fresh.mcToken
+      this.account.refreshToken = fresh.newRefreshToken
+      this.account.tokenInfo = {
+        issuedAt: Math.floor(fresh.obtainedOn / 1000),
+        expiresInSeconds: fresh.expiresInSeconds,
+        secondsUntilExpiry: fresh.expiresInSeconds,
+        isExpired: false,
+        name: fresh.profile?.name
+      }
+      this.onCredentials(this.account, {
+        mctoken: fresh.mcToken,
+        refreshToken: fresh.newRefreshToken,
+        expiresInSeconds: fresh.expiresInSeconds,
+        obtainedOn: fresh.obtainedOn
+      })
+      this.emit('token-updated', { refreshed: true })
+    } catch (e) {
+      this.emit('log', 'token refresh failed: ' + e.message)
+      // Fall through: if the old token is still valid the bot connects anyway,
+      // otherwise the join fails and we reconnect/await manual login.
+    }
   }
 
   _wire (bot) {

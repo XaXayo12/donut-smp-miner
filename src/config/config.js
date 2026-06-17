@@ -58,7 +58,8 @@ export const DEFAULTS = {
     ],
     engageRange: 10, // start defending when a hostile is this close
     attackRange: 3, // melee range
-    attackCooldownMs: 600 // wait between swings (full-damage hits)
+    attackCooldownMs: 600, // wait between swings (full-damage hits)
+    fleeHealth: 8 // at/below this HP, stop mining and teleport away (don't die)
   },
   behavior: {
     reconnectDelayMs: 8000, // wait before reconnecting after a drop

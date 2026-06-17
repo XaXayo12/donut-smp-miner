@@ -116,6 +116,15 @@ export function startBrain (bot, config, hooks = {}) {
       return
     }
 
+    // 1b) SURVIVE — if health is low, stop mining and teleport away from danger
+    // (mobs, lava, a cave we exposed). Far better than dying.
+    if (typeof bot.health === 'number' && bot.health <= (config.combat.fleeHealth ?? 8)) {
+      onStatus(`🩸 low HP (${Math.round(bot.health)}) → fleeing`)
+      await teleportToFreshArea()
+      lastProgressAt = Date.now()
+      return
+    }
+
     // 2) DONE — inventory full of dirt.
     if (isInventoryFull(bot, config)) {
       await tidyInventory()
@@ -168,7 +177,9 @@ export function startBrain (bot, config, hooks = {}) {
       if (mined % M.sweepEveryBlocks === 0) await collectNearbyDrops(bot, M.sweepRadius, 2500)
       await sleep(jitter(M.pauseBetweenBlocksMs + 100, 160)) // human reaction pause
     } else if (r === 'moved') {
-      surfaceY = Math.floor(bot.entity.position.y) // new local surface after walking
+      // Only ever RAISE the surface anchor while mining (descending is what got
+      // the bot killed in caves). It's reset to the real ground only on teleport.
+      surfaceY = Math.max(surfaceY, Math.floor(bot.entity.position.y))
       await sleep(jitter(100, 80))
     } else {
       onStatus('no dirt in reach, repositioning'); await sleep(jitter(700, 300))
