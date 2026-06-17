@@ -51,8 +51,13 @@ export function startBrain (bot, config, hooks = {}) {
   if (!bot.pathfinder) bot.loadPlugin(pathfinder)
   const movements = new Movements(bot)
   movements.canDig = true
-  movements.allow1by1towers = true
+  // --- human / low-detection movement ---
+  movements.allowSprinting = false // a human mining doesn't sprint everywhere; sprint trips speed checks
+  movements.allowParkour = false // no jumpy parkour leaps (looks botty + desyncs)
+  movements.allow1by1towers = false // never pillar straight up
+  movements.canOpenDoors = false
   movements.scafoldingBlocks = [] // never place our hard-won dirt as scaffolding
+  movements.maxDropDown = 3 // don't take big drops
   bot.pathfinder.setMovements(movements)
   bot.pathfinder.thinkTimeout = 4000
 

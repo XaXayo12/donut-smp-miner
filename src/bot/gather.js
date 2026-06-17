@@ -125,8 +125,8 @@ export async function collectNearbyDrops (bot, radius = 5, maxMs = 4000) {
 function findAdjacentTarget (bot, idSet, isSafe) {
   const eye = bot.entity.position
   const feet = eye.floored()
-  let best = null
-  // Deterministic scan order: feet level & one above first, then one below.
+  let best = null // nearest sideways/upward target (preferred — keeps us on footing)
+  let underFoot = null // the block directly under our feet (last resort = step down)
   for (const dy of [0, 1, -1]) {
     for (let dx = -2; dx <= 2; dx++) {
       for (let dz = -2; dz <= 2; dz++) {
@@ -137,11 +137,14 @@ function findAdjacentTarget (bot, idSet, isSafe) {
         if (!bot.canDigBlock(b)) continue
         const d = pos.offset(0.5, 0.5, 0.5).distanceTo(eye)
         if (d > REACH) continue
+        // The block under our own feet causes a fall + server rubber-band, so we
+        // only take it when nothing else is reachable (controlled 1-block step down).
+        if (dx === 0 && dz === 0 && dy < 0) { underFoot = b; continue }
         if (!best || d < best.d) best = { block: b, d }
       }
     }
   }
-  return best?.block || null
+  return best?.block || underFoot || null
 }
 
 // Smooth, human-like aim then dig (the dig's look is a tiny final correction).
